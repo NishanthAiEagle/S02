@@ -1,3 +1,5 @@
+// main script.js - watermark baked into drawJewelry for reliable export
+
 const videoElement   = document.getElementById('webcam');
 const canvasElement  = document.getElementById('overlay');
 const canvasCtx      = canvasElement.getContext('2d');
@@ -22,6 +24,22 @@ const galleryModal   = document.getElementById('gallery-modal');
 const galleryMain    = document.getElementById('gallery-main');
 const galleryThumbs  = document.getElementById('gallery-thumbs');
 const galleryClose   = document.getElementById('gallery-close');
+
+/* ------------ WATERMARK: load watermark image ------------ */
+const watermarkImg = new Image();
+watermarkImg.src = "logo_watermark.png";
+watermarkImg.crossOrigin = "anonymous";
+
+function ensureWatermarkLoaded() {
+  return new Promise((resolve) => {
+    if (watermarkImg.complete && watermarkImg.naturalWidth !== 0) {
+      resolve();
+    } else {
+      watermarkImg.onload = () => resolve();
+      watermarkImg.onerror = () => resolve(); // resolve even on error (prevents hang)
+    }
+  });
+}
 
 /* ------------ image helpers ------------ */
 function loadImage(src) {
@@ -127,6 +145,7 @@ faceMesh.setOptions({
 });
 
 faceMesh.onResults((results) => {
+  // clear live overlay and redraw
   canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
 
   if (!results.multiFaceLandmarks || !results.multiFaceLandmarks.length) {
@@ -165,24 +184,27 @@ videoElement.addEventListener('loadedmetadata', () => {
 
 camera.start();
 
-/* ------------ draw jewelry ------------ */
+/* ------------ draw jewelry (and watermark) ------------ */
 function drawJewelry(landmarks, ctx) {
   const context = ctx || canvasCtx;
+
+  const cw = context.canvas.width;
+  const ch = context.canvas.height;
 
   const earringScale = 0.07;
   const necklaceScale = 0.18;
 
   const leftEar = {
-    x: landmarks[132].x * canvasElement.width - 6,
-    y: landmarks[132].y * canvasElement.height - 16,
+    x: landmarks[132].x * cw - 6,
+    y: landmarks[132].y * ch - 16,
   };
   const rightEar = {
-    x: landmarks[361].x * canvasElement.width + 6,
-    y: landmarks[361].y * canvasElement.height - 16,
+    x: landmarks[361].x * cw + 6,
+    y: landmarks[361].y * ch - 16,
   };
   const neck = {
-    x: landmarks[152].x * canvasElement.width - 8,
-    y: landmarks[152].y * canvasElement.height + 10,
+    x: landmarks[152].x * cw - 8,
+    y: landmarks[152].y * ch + 10,
   };
 
   if (earringImg) {
@@ -197,6 +219,25 @@ function drawJewelry(landmarks, ctx) {
     const height = necklaceImg.height * necklaceScale;
     context.drawImage(necklaceImg, neck.x - width / 2, neck.y, width, height);
   }
+
+  // DRAW WATERMARK so it's included in captures
+  try {
+    if (watermarkImg && watermarkImg.naturalWidth) {
+      // watermark size relative to canvas width
+      const wmWidth = Math.round(cw * 0.22); // 22% of canvas width
+      const wmHeight = Math.round((watermarkImg.height / watermarkImg.width) * wmWidth);
+
+      const padding = Math.round(cw * 0.02);
+      const x = cw - wmWidth - padding;
+      const y = ch - wmHeight - padding;
+
+      context.globalAlpha = 0.85;
+      context.drawImage(watermarkImg, x, y, wmWidth, wmHeight);
+      context.globalAlpha = 1.0;
+    }
+  } catch (e) {
+    console.warn("Watermark draw failed:", e);
+  }
 }
 
 /* ------------ snapshot helpers ------------ */
@@ -206,29 +247,28 @@ function triggerFlash() {
   setTimeout(() => flashOverlay.classList.remove('active'), 180);
 }
 
-function captureSnapshotDataURL() {
-  const snapshotCanvas = document.createElement('canvas');
-  const ctx = snapshotCanvas.getContext('2d');
-
-  snapshotCanvas.width  = canvasElement.width;
-  snapshotCanvas.height = canvasElement.height;
-
-  ctx.drawImage(videoElement, 0, 0, snapshotCanvas.width, snapshotCanvas.height);
-  if (smoothedLandmarks) {
-    drawJewelry(smoothedLandmarks, ctx);
-  }
-  return snapshotCanvas.toDataURL('image/png');
-}
-
-/* ------------ manual snapshot button (single) ------------ */
-function takeSnapshot() {
+async function takeSnapshot() {
   if (!smoothedLandmarks) {
     alert("Face not detected. Please try again.");
     return;
   }
 
+  // ensure watermark is loaded before capture
+  await ensureWatermarkLoaded();
+
   triggerFlash();
-  lastSnapshotDataURL = captureSnapshotDataURL();
+
+  const snapshotCanvas = document.createElement('canvas');
+  snapshotCanvas.width = canvasElement.width;
+  snapshotCanvas.height = canvasElement.height;
+  const ctx = snapshotCanvas.getContext('2d');
+
+  // draw video frame then jewelry+watermark
+  ctx.drawImage(videoElement, 0, 0, snapshotCanvas.width, snapshotCanvas.height);
+  drawJewelry(smoothedLandmarks, ctx);
+
+  lastSnapshotDataURL = snapshotCanvas.toDataURL('image/png');
+
   document.getElementById('snapshot-preview').src = lastSnapshotDataURL;
   document.getElementById('snapshot-modal').style.display = 'block';
 }
@@ -316,11 +356,22 @@ async function startAutoTry() {
       await changeNecklace(src);
     }
 
+    // wait for visual stabilisation
     await new Promise(res => setTimeout(res, 800));
 
     triggerFlash();
     if (smoothedLandmarks) {
-      const dataURL = captureSnapshotDataURL();
+      await ensureWatermarkLoaded();
+
+      const snapshotCanvas = document.createElement('canvas');
+      snapshotCanvas.width = canvasElement.width;
+      snapshotCanvas.height = canvasElement.height;
+      const ctx = snapshotCanvas.getContext('2d');
+
+      ctx.drawImage(videoElement, 0, 0, snapshotCanvas.width, snapshotCanvas.height);
+      drawJewelry(smoothedLandmarks, ctx);
+
+      const dataURL = snapshotCanvas.toDataURL('image/png');
       autoSnapshots.push(dataURL);
     }
 
@@ -382,10 +433,11 @@ async function downloadAllImages() {
   const zip = new JSZip();
   const folder = zip.folder("Your_Looks");
 
-  autoSnapshots.forEach((dataURL, index) => {
+  for (let i = 0; i < autoSnapshots.length; i++) {
+    const dataURL = autoSnapshots[i]; // already watermarked
     const base64Data = dataURL.split(",")[1]; // remove header
-    folder.file(`look_${index + 1}.png`, base64Data, { base64: true });
-  });
+    folder.file(`look_${i + 1}.png`, base64Data, { base64: true });
+  }
 
   const content = await zip.generateAsync({ type: "blob" });
   saveAs(content, "OverlayJewels_Looks.zip");
