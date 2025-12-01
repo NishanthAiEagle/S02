@@ -1,4 +1,4 @@
-// main script.js - watermark baked into drawJewelry for reliable export
+// script.js - draws video into canvas + jewelry + watermark (full baked captures)
 
 const videoElement   = document.getElementById('webcam');
 const canvasElement  = document.getElementById('overlay');
@@ -36,7 +36,7 @@ function ensureWatermarkLoaded() {
       resolve();
     } else {
       watermarkImg.onload = () => resolve();
-      watermarkImg.onerror = () => resolve(); // resolve even on error (prevents hang)
+      watermarkImg.onerror = () => resolve();
     }
   });
 }
@@ -144,12 +144,36 @@ faceMesh.setOptions({
   minTrackingConfidence: 0.6
 });
 
+/* ===== Updated: draw video into canvas then overlays ===== */
 faceMesh.onResults((results) => {
-  // clear live overlay and redraw
+  // ensure canvas size matches video
+  if (videoElement.videoWidth && videoElement.videoHeight) {
+    canvasElement.width  = videoElement.videoWidth;
+    canvasElement.height = videoElement.videoHeight;
+  }
+
+  // draw the current video frame into the canvas (so canvas contains camera feed)
   canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+  try {
+    canvasCtx.drawImage(videoElement, 0, 0, canvasElement.width, canvasElement.height);
+  } catch (e) {
+    console.warn("Video draw failed:", e);
+  }
 
   if (!results.multiFaceLandmarks || !results.multiFaceLandmarks.length) {
     smoothedLandmarks = null;
+    // still draw watermark so user sees it
+    try {
+      if (watermarkImg && watermarkImg.naturalWidth) {
+        const cw = canvasElement.width, ch = canvasElement.height;
+        const wmWidth = Math.round(cw * 0.22);
+        const wmHeight = Math.round((watermarkImg.height / watermarkImg.width) * wmWidth);
+        const padding = Math.round(cw * 0.02);
+        canvasCtx.globalAlpha = 0.85;
+        canvasCtx.drawImage(watermarkImg, cw - wmWidth - padding, ch - wmHeight - padding, wmWidth, wmHeight);
+        canvasCtx.globalAlpha = 1.0;
+      }
+    } catch (e) {}
     return;
   }
 
@@ -165,10 +189,12 @@ faceMesh.onResults((results) => {
     }));
   }
 
+  // draw jewelry + watermark on top of the already-drawn video frame
   drawJewelry(smoothedLandmarks, canvasCtx);
 });
 
 /* ------------ Camera ------------ */
+// Use Mediapipe Camera for consistent onFrame behaviour
 const camera = new Camera(videoElement, {
   onFrame: async () => {
     await faceMesh.send({ image: videoElement });
@@ -177,6 +203,7 @@ const camera = new Camera(videoElement, {
   height: 720
 });
 
+// keep canvas size in sync when metadata loads
 videoElement.addEventListener('loadedmetadata', () => {
   canvasElement.width = videoElement.videoWidth;
   canvasElement.height = videoElement.videoHeight;
@@ -194,6 +221,7 @@ function drawJewelry(landmarks, ctx) {
   const earringScale = 0.07;
   const necklaceScale = 0.18;
 
+  // Landmarks used: 132 (left ear), 361 (right ear), 152 (neck)
   const leftEar = {
     x: landmarks[132].x * cw - 6,
     y: landmarks[132].y * ch - 16,
@@ -202,6 +230,7 @@ function drawJewelry(landmarks, ctx) {
     x: landmarks[361].x * cw + 6,
     y: landmarks[361].y * ch - 16,
   };
+  // you can tweak the "+10" to lift/lower the chain
   const neck = {
     x: landmarks[152].x * cw - 8,
     y: landmarks[152].y * ch + 10,
@@ -223,10 +252,8 @@ function drawJewelry(landmarks, ctx) {
   // DRAW WATERMARK so it's included in captures
   try {
     if (watermarkImg && watermarkImg.naturalWidth) {
-      // watermark size relative to canvas width
       const wmWidth = Math.round(cw * 0.22); // 22% of canvas width
       const wmHeight = Math.round((watermarkImg.height / watermarkImg.width) * wmWidth);
-
       const padding = Math.round(cw * 0.02);
       const x = cw - wmWidth - padding;
       const y = ch - wmHeight - padding;
@@ -253,7 +280,6 @@ async function takeSnapshot() {
     return;
   }
 
-  // ensure watermark is loaded before capture
   await ensureWatermarkLoaded();
 
   triggerFlash();
@@ -263,8 +289,12 @@ async function takeSnapshot() {
   snapshotCanvas.height = canvasElement.height;
   const ctx = snapshotCanvas.getContext('2d');
 
-  // draw video frame then jewelry+watermark
-  ctx.drawImage(videoElement, 0, 0, snapshotCanvas.width, snapshotCanvas.height);
+  // draw video then overlays (drawJewelry adds jewelry + watermark)
+  try {
+    ctx.drawImage(videoElement, 0, 0, snapshotCanvas.width, snapshotCanvas.height);
+  } catch (e) {
+    console.warn("Snapshot video draw failed:", e);
+  }
   drawJewelry(smoothedLandmarks, ctx);
 
   lastSnapshotDataURL = snapshotCanvas.toDataURL('image/png');
@@ -368,7 +398,11 @@ async function startAutoTry() {
       snapshotCanvas.height = canvasElement.height;
       const ctx = snapshotCanvas.getContext('2d');
 
-      ctx.drawImage(videoElement, 0, 0, snapshotCanvas.width, snapshotCanvas.height);
+      try {
+        ctx.drawImage(videoElement, 0, 0, snapshotCanvas.width, snapshotCanvas.height);
+      } catch (e) {
+        console.warn("AutoTry video draw failed:", e);
+      }
       drawJewelry(smoothedLandmarks, ctx);
 
       const dataURL = snapshotCanvas.toDataURL('image/png');

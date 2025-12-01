@@ -29,7 +29,7 @@ body {
   height: 40px;
 }
 
-/* Video & Canvas (AUTO-ZOOM REMOVED HERE) */
+/* Video & Canvas: we draw video to canvas; hide raw video element */
 #video-container {
   position: absolute;
   inset: 0;
@@ -37,13 +37,20 @@ body {
   background: #000;
 }
 
-#webcam,
+/* hide the raw video since canvas shows the feed */
+#webcam {
+  display: none;
+}
+
 #overlay {
   position: absolute;
+  top: 0;
+  left: 0;
   width: 100%;
   height: 100%;
-  object-fit: contain;  /* ⭐ FULL CAMERA VIEW, NO ZOOM */
+  object-fit: contain;
   background: #000;
+  z-index: 1;
 }
 
 /* Jewelry category bar */

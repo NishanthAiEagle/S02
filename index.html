@@ -16,7 +16,8 @@
 
     <!-- Video + Canvas -->
     <div id="video-container">
-      <video id="webcam" autoplay playsinline></video>
+      <!-- video is used as source only; canvas displays everything -->
+      <video id="webcam" autoplay playsinline muted></video>
       <canvas id="overlay"></canvas>
     </div>
 
@@ -24,7 +25,6 @@
     <div id="jewelry-mode">
       <button onclick="toggleCategory('gold')">Gold</button>
       <button onclick="toggleCategory('diamond')">Diamond</button>
-      <!-- TRY ALL BUTTON -->
       <button id="tryall-btn" onclick="toggleTryAll()">Try All</button>
     </div>
 
@@ -91,7 +91,6 @@
       <img id="gallery-main" src="" alt="Selected look" />
       <div id="gallery-thumbs"></div>
       <div class="gallery-buttons">
-        <!-- Download all + share -->
         <button onclick="downloadAllImages()">Download All</button>
         <button onclick="shareCurrentFromGallery()">Share</button>
       </div>
